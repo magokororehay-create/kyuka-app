@@ -40,6 +40,9 @@
   @media (min-width:520px){ .ovl{align-items:center;} .sheet{border-radius:16px;} }
   .pill{display:inline-block;background:#eef4ff;color:#0071e3;border-radius:14px;padding:3px 10px;font-size:12px;margin:0 6px 6px 0;}
   .warn{background:#fff3cd;color:#7a5c00;border:1px solid #ffe08a;padding:8px 10px;border-radius:8px;font-size:13px;margin-top:8px;}
+  /* 自動更新が止まっているときだけ出す（古い数字を「動いている」と誤解させないため） */
+  .stale{background:#ffe8e8;color:#b00;border:1px solid #f5b5b5;padding:10px;border-radius:8px;
+         font-size:13px;font-weight:600;margin-bottom:10px;}
   .rec{font-size:13px;color:#444;padding:7px 0;border-bottom:1px dashed #eee;}
   .muted{color:#8a8a8e;font-size:12px;}
   .sect{font-size:13px;color:#8a8a8e;margin:2px 0 8px;font-weight:600;}
@@ -82,6 +85,7 @@
     <h1>休暇のこり確認 <span class="muted" id="who" style="float:right;font-weight:400;font-size:13px;margin-top:6px;"></span></h1>
 
     <div class="card" id="balCard">
+      <div class="stale hidden" id="staleBox"></div>
       <div class="updated" id="updated"></div>
       <div id="balList"></div>
       <div id="pills" style="margin-top:12px;"></div>
@@ -265,7 +269,7 @@
     el('balList').innerHTML = ''; el('pills').innerHTML = '';
     el('adminTable').innerHTML = ''; el('recList').innerHTML = '';
     el('who').textContent = ''; el('updated').textContent = '';
-    hide('warnBox'); hide('adminNameWrap');
+    hide('warnBox'); hide('adminNameWrap'); hide('staleBox');
     msg('loadMsg','',''); msg('formMsg','','');
   }
 
@@ -306,10 +310,29 @@
     return '';
   }
 
+  // 残数は3時間ごとの自動更新で作られる。止まると古い数字が出続けて「動いている」ように見えるので、
+  // バナーの生成日が古いときだけはっきり知らせる。
+  function checkStale(banner){
+    var m = /生成:(\d{4})-(\d{2})-(\d{2})/.exec(String(banner||''));
+    if(!m){ hide('staleBox'); return; }
+    var gen = new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = Math.round((today - gen) / 86400000);
+    if(days >= 2){
+      el('staleBox').textContent = '⚠ 自動更新が止まっている可能性があります（最終更新 '
+        + m[2] + '/' + m[3] + '・' + days + '日前）。表示中の残り時間は古いままです。管理者へご連絡ください。';
+      show('staleBox');
+    } else {
+      hide('staleBox');
+    }
+  }
+
   function render(d){
     resetView();
     setKindOptions(d.kinds || KINDS_ALL);
     el('updated').textContent = d.updated || '';
+    checkStale(d.updated);
     el('date').value = todayStr();
     if(d.admin){ renderAdmin(d); } else { renderStaff(d); }
   }
@@ -382,7 +405,7 @@
     var body = rows.map(function(b){
       // 対象外の休暇は数字ではなく「−」で分かるようにする
       var ref = (normJob(b.job) === '看護師') ? esc(b.refresh)+'h' : '−';
-      var you = Number(b.youikuChildren||0) > 0 ? esc(b.youiku)+'h' : '−';
+      var you = b.youikuEligible ? esc(b.youiku)+'h' : '−';
       return '<tr><td>'+esc(b.name)+'</td><td>'+esc(b.job||'未設定')+'</td><td>'+esc(b.yukyu)
         +'h</td><td>'+ref+'</td><td>'+esc(b.nursing)+'h</td><td>'+you+'</td><td>'+(b.warn?'⚠':'')+'</td></tr>';
     }).join('');
