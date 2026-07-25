@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>休暇のこり確認</title>
+<style>
+  body{font-family:-apple-system,sans-serif;margin:0;padding:16px;background:#f5f5f7;color:#1d1d1f;}
+  h1{font-size:20px;margin:4px 0 12px;}
+  .wrap{max-width:430px;margin:0 auto;}
+  label{display:block;margin:12px 0 4px;font-weight:600;font-size:14px;}
+  select,input[type=date],input[type=number],input[type=password],input[type=text],textarea{width:100%;padding:10px;font-size:16px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;}
+  button{width:100%;padding:14px;font-size:16px;border:none;border-radius:8px;background:#0071e3;color:#fff;margin-top:16px;}
+  button:disabled{background:#aaa;}
+  .card{background:#fff;border-radius:12px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(0,0,0,.06);}
+  .updated{font-size:12px;color:#888;margin-bottom:10px;}
+  .bal{display:flex;justify-content:space-between;align-items:baseline;padding:10px 0;border-bottom:1px solid #f0f0f0;}
+  .bal:last-child{border-bottom:none;}
+  .bal .n{font-weight:600;}
+  .bal .v{font-size:22px;font-weight:700;color:#0071e3;}
+  .bal .v small{font-size:13px;color:#888;font-weight:400;}
+  .sub{font-size:12px;color:#666;}
+  .pill{display:inline-block;background:#eef4ff;color:#0071e3;border-radius:14px;padding:3px 10px;font-size:12px;margin:0 6px 6px 0;}
+  .warn{background:#fff3cd;color:#7a5c00;border:1px solid #ffe08a;padding:8px 10px;border-radius:8px;font-size:13px;margin-top:8px;}
+  .rec{font-size:13px;color:#444;padding:7px 0;border-bottom:1px dashed #eee;}
+  .muted{color:#8a8a8e;font-size:12px;}
+  .sect{font-size:13px;color:#8a8a8e;margin:2px 0 8px;font-weight:600;}
+  .hint{font-size:12px;color:#8a8a8e;margin-top:4px;}
+  .msg{padding:10px;border-radius:8px;margin-top:12px;font-size:14px;}
+  .msg.err{background:#ffe8e8;color:#b00;}
+  .msg.ok{background:#e8ffea;color:#070;}
+  .hidden{display:none;}
+  #pinCard{max-width:360px;margin:60px auto;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:right;padding:6px 4px;border-bottom:1px solid #eee;}
+  th:first-child,td:first-child{text-align:left;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- PIN入力 -->
+  <div class="card hidden" id="pinCard">
+    <h1>休暇のこり確認</h1>
+    <label>暗証番号（PIN）</label>
+    <input type="password" id="pinInput" inputmode="numeric" placeholder="配布された暗証番号を入力">
+    <button id="pinBtn">はじめる</button>
+    <div id="pinMsg"></div>
+  </div>
+
+  <!-- 本体 -->
+  <div id="app" class="hidden">
+    <h1>休暇のこり確認 <span class="muted" id="who" style="float:right;font-weight:400;font-size:13px;margin-top:6px;"></span></h1>
+
+    <div class="card" id="balCard">
+      <div class="updated" id="updated"></div>
+      <div id="balList"></div>
+      <div id="pills" style="margin-top:12px;"></div>
+      <div class="warn hidden" id="warnBox"></div>
+      <div id="loadMsg"></div>
+    </div>
+
+    <div class="card hidden" id="formCard">
+      <div class="sect">休暇を記録する</div>
+      <div id="adminNameWrap" class="hidden">
+        <label>職員（管理者の代理入力）</label>
+        <select id="adminName"></select>
+      </div>
+      <label>取得日</label>
+      <input type="date" id="date">
+      <label>種別</label>
+      <select id="kind"></select>
+      <label>時間</label>
+      <input type="number" id="hours" value="1" min="1" max="24" step="1" inputmode="numeric">
+      <div class="hint">1時間単位で入力します（1日休む場合は勤務時間数、例：8）。</div>
+      <label>メモ（任意）</label>
+      <textarea id="memo" placeholder="例：通院のため" style="min-height:56px;" maxlength="200"></textarea>
+      <button id="submitBtn">この内容で記録する</button>
+      <div id="formMsg"></div>
+      <div class="muted" style="margin-top:8px;">※記録は保存され、残り時間は次回の自動更新で反映されます。</div>
+    </div>
+
+    <div class="card hidden" id="recCard">
+      <div class="sect">自分の直近の記録（閲覧のみ）</div>
+      <div id="recList"></div>
+      <div class="muted" style="margin-top:8px;">修正・削除が必要なときは管理者へ連絡してください。</div>
+    </div>
+
+    <!-- 管理者：全員の残数 -->
+    <div class="card hidden" id="adminCard">
+      <div class="sect">全員の残時間（管理者・閲覧）</div>
+      <div style="overflow-x:auto;"><table id="adminTable"></table></div>
+    </div>
+
+    <div class="muted" style="text-align:center;"><a href="#" id="logoutBtn" style="color:#0071e3;text-decoration:none;">別のPINで入りなおす</a></div>
+  </div>
+
+</div>
+
+<script>
+  // ▼ GASのWebアプリURL(/exec)
+  var API_URL = 'https://script.google.com/macros/s/AKfycbyTM93TAWPODL26QlqXPDqkw8FQym3LS6xSI_OJKgz56z13QTJBVW1Emt4m2lFDMRc/exec';
+
+  function el(id){ return document.getElementById(id); }
+  function show(id){ el(id).classList.remove('hidden'); }
+  function hide(id){ el(id).classList.add('hidden'); }
+  function msg(id, text, cls){ el(id).innerHTML = text ? '<div class="msg '+cls+'">'+esc(text)+'</div>' : ''; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+
+  var currentAdmin = false;   // 管理者モードか（代理入力の氏名必須判定に使う）
+
+  // 端末のローカル日付（JST）。toISOString はUTC基準で前日になるため使わない。
+  function todayStr(){
+    var d = new Date();
+    return d.getFullYear() + '-' + ('0'+(d.getMonth()+1)).slice(-2) + '-' + ('0'+d.getDate()).slice(-2);
+  }
+
+  async function api(action, payload){
+    var body = JSON.stringify({ action: action, pin: localStorage.getItem('kyuka_pin')||'', payload: payload||null });
+    var r = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: body });
+    var j = await r.json();
+    if(!j.ok) throw new Error(j.error||'APIエラー');
+    return j.data;
+  }
+
+  // PINまわりのエラーはログイン画面に戻す
+  function isAuthError(m){
+    m = String(m||'');
+    return m.indexOf('PIN') !== -1 || m.indexOf('無効') !== -1 || m.indexOf('受け付けを停止') !== -1;
+  }
+
+  function askPin(message){
+    resetView();
+    hide('app'); show('pinCard');
+    msg('pinMsg', message || '', 'err');
+  }
+
+  // 画面状態を初期化（管理者→職員の切替で前の描画が残らないように）
+  function resetView(){
+    currentAdmin = false;
+    hide('adminCard'); hide('formCard'); hide('recCard');
+    el('balList').innerHTML = ''; el('pills').innerHTML = '';
+    el('adminTable').innerHTML = ''; el('recList').innerHTML = '';
+    el('who').textContent = ''; el('updated').textContent = '';
+    hide('warnBox'); hide('adminNameWrap');
+    msg('loadMsg','',''); msg('formMsg','','');
+  }
+
+  el('pinBtn').onclick = function(){
+    var v = el('pinInput').value.trim();
+    if(!v){ msg('pinMsg','暗証番号を入力してください','err'); return; }
+    localStorage.setItem('kyuka_pin', v);
+    msg('pinMsg','',''); hide('pinCard'); show('app'); load();
+  };
+  el('logoutBtn').onclick = function(e){
+    e.preventDefault();
+    localStorage.removeItem('kyuka_pin');
+    el('pinInput').value = '';
+    askPin('');
+  };
+
+  function load(){
+    resetView();
+    el('balList').innerHTML = '<div class="muted">読み込み中…</div>';
+    el('date').value = todayStr();
+    api('me').then(function(d){
+      resetView();
+      el('kind').innerHTML = (d.kinds||[]).map(function(k){ return '<option>'+esc(k)+'</option>'; }).join('');
+      el('updated').textContent = d.updated || '';
+      if(d.admin){ renderAdmin(d); } else { renderStaff(d); }
+    }).catch(function(e){
+      if(isAuthError(e.message)){ askPin(e.message); }
+      else { el('balList').innerHTML = ''; msg('loadMsg','読み込みに失敗: '+e.message,'err'); }
+    });
+  }
+
+  function renderStaff(d){
+    currentAdmin = false;
+    el('who').textContent = (d.name||'')+' さん';
+    show('formCard'); show('recCard');
+    var b = d.balance;
+    if(!b){
+      el('balList').innerHTML = '<div class="muted">まだ集計されていません（管理者の自動更新後に表示されます）。</div>';
+    } else {
+      el('balList').innerHTML =
+        '<div class="bal"><div><div class="n">有給休暇</div><div class="sub">次回付与 '+esc(b['有給_次回付与日']||'-')
+          + (Number(b['有給_時効間近(時間)'])>0 ? '　/　まもなく時効 '+esc(b['有給_時効間近(時間)'])+'時間' : '') +'</div></div>'
+          + '<div class="v">'+esc(b['有給_残(時間)'])+'<small> 時間</small></div></div>'
+        + '<div class="bal"><div class="n">リフレッシュ休暇</div><div class="v">'+esc(b['リフレッシュ_残(時間)'])+'<small> 時間</small></div></div>'
+        + '<div class="bal"><div><div class="n">子の看護休暇</div><div class="sub">対象の子 '+esc(b['看護_対象子数'])+'人</div></div>'
+          + '<div class="v">'+esc(b['看護_残(時間)'])+'<small> 時間</small></div></div>';
+      el('pills').innerHTML = '<div class="sect">今年度の記録（参考）</div>'
+        + '<span class="pill">早退 '+esc(b['早退_回数'])+'回・'+esc(b['早退_時間'])+'時間</span>'
+        + '<span class="pill">遅刻 '+esc(b['遅刻_回数'])+'回・'+esc(b['遅刻_時間'])+'時間</span>'
+        + '<span class="pill">欠勤 '+esc(b['欠勤_回数'])+'回・'+esc(b['欠勤_時間'])+'時間</span>'
+        + '<span class="pill">特別 '+esc(b['特別_時間'])+'時間</span>';
+      if(b['警告']){ el('warnBox').textContent = '⚠ '+b['警告']; show('warnBox'); }
+    }
+    renderRecords(d.records||[]);
+  }
+
+  function renderRecords(rows){
+    el('recList').innerHTML = rows.length ? rows.map(function(r){
+      return '<div class="rec">'+esc(r.date)+'　'+esc(r.kind)+'　'+esc(r.hours)+'時間'+(r.memo?'　'+esc(r.memo):'')+'</div>';
+    }).join('') : '<div class="muted">まだ記録がありません。</div>';
+  }
+
+  function renderAdmin(d){
+    currentAdmin = true;
+    el('who').textContent = '管理者';
+    show('adminCard'); show('formCard'); show('adminNameWrap');
+    el('balList').innerHTML = '';
+    // 代理入力の職員は職員マスタの在籍者から選ぶ（打ち間違いによる不一致を防ぐ）
+    var names = d.staffNames || [];
+    el('adminName').innerHTML = '<option value="">— 職員を選んでください —</option>'
+      + names.map(function(n){ return '<option value="'+esc(n)+'">'+esc(n)+'</option>'; }).join('');
+    var rows = d.all||[];
+    var head = '<tr><th>氏名</th><th>有給</th><th>リフレ</th><th>看護</th><th></th></tr>';
+    var body = rows.map(function(b){
+      return '<tr><td>'+esc(b.name)+'</td><td>'+esc(b.yukyu)+'h</td><td>'+esc(b.refresh)
+        +'h</td><td>'+esc(b.nursing)+'h</td><td>'+(b.warn?'⚠':'')+'</td></tr>';
+    }).join('');
+    el('adminTable').innerHTML = head + (body || '<tr><td colspan="5">まだ集計されていません</td></tr>');
+  }
+
+  el('submitBtn').onclick = function(){
+    msg('formMsg','','');
+    var hours = Number(el('hours').value);
+    if(!isFinite(hours) || hours <= 0 || hours !== Math.round(hours)){
+      msg('formMsg','時間は1時間単位の整数で入力してください','err'); return;
+    }
+    if(hours > 24){ msg('formMsg','1件あたり24時間までです（分けて記録してください）','err'); return; }
+    if(!el('date').value){ msg('formMsg','取得日を選んでください','err'); return; }
+    var payload = { dateStr: el('date').value, kind: el('kind').value, hours: hours, memo: el('memo').value };
+    if(currentAdmin){
+      var adminName = el('adminName').value;
+      if(!adminName){ msg('formMsg','記録する職員を選んでください','err'); return; }
+      payload.name = adminName;
+    }
+
+    el('submitBtn').disabled = true;
+    api('submit', payload).then(function(){
+      el('memo').value=''; el('hours').value='1';
+      el('submitBtn').disabled = false;
+      // 保存は成功済み。以降の再読込が失敗しても「記録に失敗」とは出さない。
+      api('me').then(function(d){
+        resetView();
+        el('kind').innerHTML = (d.kinds||[]).map(function(k){ return '<option>'+esc(k)+'</option>'; }).join('');
+        el('updated').textContent = d.updated || '';
+        el('date').value = todayStr();
+        if(d.admin){ renderAdmin(d); } else { renderStaff(d); }
+        msg('formMsg','記録しました。残り時間は次回の自動更新で反映されます。','ok');
+      }).catch(function(){
+        msg('formMsg','記録しました。（画面の再読み込みに失敗しました）','ok');
+      });
+    }).catch(function(e){
+      el('submitBtn').disabled = false;
+      if(isAuthError(e.message)){ askPin(e.message); }
+      else msg('formMsg','記録に失敗: '+e.message,'err');
+    });
+  };
+
+  // 起動
+  if(localStorage.getItem('kyuka_pin')){ show('app'); load(); } else askPin('');
+</script>
+</body>
+</html>
