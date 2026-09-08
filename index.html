@@ -47,8 +47,14 @@
   .muted{color:#8a8a8e;font-size:12px;}
   .sect{font-size:13px;color:#8a8a8e;margin:2px 0 8px;font-weight:600;}
   .hint{font-size:12px;color:#8a8a8e;margin-top:4px;}
-  /* 取得単位が他と違う種別（子の看護等休暇）の注意書き。見落とすと誤入力になるので赤で出す */
+  /* 取得単位が他と違う種別（子の看護等休暇・早退等）の注意書き。見落とすと誤入力になるので赤で出す */
   .hint.alert{color:#c00;font-weight:700;}
+  /* 入力できない欄は見て分かるようにする（早退・遅刻・欠勤のときの「時間」） */
+  input:disabled{background:#f0f0f2;color:#aaa;}
+  /* 実際の時間：[2]時間[30]分 を1行に並べる */
+  .hm{display:flex;align-items:center;gap:6px;}
+  .hm select{width:auto;flex:1 1 0;}
+  .hm span{font-size:14px;color:#444;}
   .msg{padding:10px;border-radius:8px;margin-top:12px;font-size:14px;}
   .msg.err{background:#ffe8e8;color:#b00;}
   .msg.ok{background:#e8ffea;color:#070;}
@@ -108,6 +114,15 @@
       <label>時間</label>
       <input type="number" id="hours" value="1" min="1" max="24" step="1" inputmode="numeric">
       <div class="hint" id="hoursHint">1時間単位で入力します（1日休む場合は勤務時間数、例：8）。</div>
+      <!-- 早退・遅刻・欠勤のときだけ出す。時間は数えないが、何分だったかは記録として残す -->
+      <div id="actualWrap" class="hidden">
+        <label>実際の時間（必須）</label>
+        <div class="hm">
+          <select id="actualHours"></select><span>時間</span>
+          <select id="actualMinutes"></select><span>分</span>
+        </div>
+        <div class="hint alert">記入例：2時間30分の欠勤 →「2」時間「30」分／30分の遅刻 →「0」時間「30」分</div>
+      </div>
       <label>メモ（任意）</label>
       <textarea id="memo" placeholder="例：通院のため" style="min-height:56px;" maxlength="200"></textarea>
       <button id="submitBtn">この内容で記録する</button>
@@ -303,20 +318,40 @@
     var cur = el('kind').value;
     el('kind').innerHTML = (kinds||[]).map(function(k){ return '<option>'+esc(k)+'</option>'; }).join('');
     if(cur && kinds.indexOf(cur) !== -1) el('kind').value = cur;
-    updateHoursHint();
+    updateKindUi();
   }
+
+  // 時間を数えず「回数」だけを記録する種別（時間の正は勤怠システム側）
+  var COUNT_ONLY_KINDS = ['早退','遅刻','欠勤'];
+  function isCountOnly(kind){ return COUNT_ONLY_KINDS.indexOf(kind) !== -1; }
+
+  // 実際の時間のプルダウン（0〜12時間 / 5分刻み）。Code.gs 側の検証と範囲を合わせる。
+  (function initActual(){
+    var hs = '', ms = '';
+    for(var h=0; h<=12; h++) hs += '<option value="'+h+'">'+h+'</option>';
+    for(var m=0; m<60; m+=5) ms += '<option value="'+m+'">'+m+'</option>';
+    el('actualHours').innerHTML = hs;
+    el('actualMinutes').innerHTML = ms;
+  })();
 
   // 種別ごとに取得単位が違う。子の看護等休暇は当社では半日／1日のみ（時間単位は不可）。
   var HINT_DEFAULT = '1時間単位で入力します（1日休む場合は勤務時間数、例：8）。';
+  var HINT_COUNT_ONLY = '早退・遅刻・欠勤は、時間に関係なく「回数」のみを数えます。実際の時間は下の欄に必ずご記入ください。';
   var HINT_BY_KIND = {
     '看護': '子の看護等休暇は半日または1日単位です。半日なら所定労働時間の半分、1日なら所定労働時間数を入力してください（時間単位での取得はできません）。'
   };
-  function updateHoursHint(){
-    var special = HINT_BY_KIND[el('kind').value];
+  // 種別を切り替えるたびに、時間欄の入力可否・注釈・実時間欄の出し入れをまとめてやり直す
+  // （どれか1つだけ更新すると、切り替え後に前の状態が残る）。
+  function updateKindUi(){
+    var countOnly = isCountOnly(el('kind').value);
+    var special = countOnly ? HINT_COUNT_ONLY : HINT_BY_KIND[el('kind').value];
     el('hoursHint').textContent = special || HINT_DEFAULT;
     el('hoursHint').className = special ? 'hint alert' : 'hint';
+    el('hours').disabled = countOnly;
+    el('hours').value = countOnly ? '' : (el('hours').value || '1');
+    el('actualWrap').className = countOnly ? '' : 'hidden';
   }
-  el('kind').onchange = updateHoursHint;
+  el('kind').onchange = updateKindUi;
 
   function normJob(v){
     var t = String(v==null?'':v).replace(/\s+/g,'');
@@ -389,9 +424,10 @@
         + '<div class="bal"><div><div class="n">養育両立支援休暇'+helpBtn('youiku')+'</div><div class="sub">対象の子 '+esc(b['養育_対象子数']||0)+'人</div></div>'
           + youikuCell+'</div>';
       el('pills').innerHTML = '<div class="sect">今年度の記録（参考）</div>'
-        + '<span class="pill">早退 '+esc(b['早退_回数'])+'回・'+esc(b['早退_時間'])+'時間</span>'
-        + '<span class="pill">遅刻 '+esc(b['遅刻_回数'])+'回・'+esc(b['遅刻_時間'])+'時間</span>'
-        + '<span class="pill">欠勤 '+esc(b['欠勤_回数'])+'回・'+esc(b['欠勤_時間'])+'時間</span>'
+        // 早退・遅刻・欠勤は回数のみ（時間は勤怠システム側が正）
+        + '<span class="pill">早退 '+esc(b['早退_回数'])+'回</span>'
+        + '<span class="pill">遅刻 '+esc(b['遅刻_回数'])+'回</span>'
+        + '<span class="pill">欠勤 '+esc(b['欠勤_回数'])+'回</span>'
         + '<span class="pill">特別 '+esc(b['特別_時間'])+'時間</span>';
       if(b['警告']){ el('warnBox').textContent = '⚠ '+b['警告']; show('warnBox'); }
     }
@@ -400,7 +436,9 @@
 
   function renderRecords(rows){
     el('recList').innerHTML = rows.length ? rows.map(function(r){
-      return '<div class="rec">'+esc(r.date)+'　'+esc(r.kind)+'　'+esc(r.hours)+'時間'+(r.memo?'　'+esc(r.memo):'')+'</div>';
+      // 実時間があればそれを出す（早退等）。無ければ従来どおり時間（過去の記録もこちら）。
+      var len = r.actual ? esc(r.actual) : esc(r.hours)+'時間';
+      return '<div class="rec">'+esc(r.date)+'　'+esc(r.kind)+'　'+len+(r.memo?'　'+esc(r.memo):'')+'</div>';
     }).join('') : '<div class="muted">まだ記録がありません。</div>';
   }
 
@@ -430,13 +468,25 @@
 
   el('submitBtn').onclick = function(){
     msg('formMsg','','');
-    var hours = Number(el('hours').value);
-    if(!isFinite(hours) || hours <= 0 || hours !== Math.round(hours)){
-      msg('formMsg','時間は1時間単位の整数で入力してください','err'); return;
+    var kind = el('kind').value;
+    var countOnly = isCountOnly(kind);
+    var payload = { dateStr: el('date').value, kind: kind, memo: el('memo').value };
+    if(countOnly){
+      // 時間は数えない。代わりに実際の時間を必ず入れてもらう（0時間0分のままは通さない）。
+      var ah = Number(el('actualHours').value), am = Number(el('actualMinutes').value);
+      if(ah * 60 + am <= 0){
+        msg('formMsg','実際の時間を入力してください（例：2時間30分）','err'); return;
+      }
+      payload.actualHours = ah; payload.actualMinutes = am;
+    } else {
+      var hours = Number(el('hours').value);
+      if(!isFinite(hours) || hours <= 0 || hours !== Math.round(hours)){
+        msg('formMsg','時間は1時間単位の整数で入力してください','err'); return;
+      }
+      if(hours > 24){ msg('formMsg','1件あたり24時間までです（分けて記録してください）','err'); return; }
+      payload.hours = hours;
     }
-    if(hours > 24){ msg('formMsg','1件あたり24時間までです（分けて記録してください）','err'); return; }
     if(!el('date').value){ msg('formMsg','取得日を選んでください','err'); return; }
-    var payload = { dateStr: el('date').value, kind: el('kind').value, hours: hours, memo: el('memo').value };
     if(currentAdmin){
       var idx = el('adminName').value;
       if(idx === '' || !adminStaff[Number(idx)]){
@@ -447,7 +497,10 @@
 
     el('submitBtn').disabled = true;
     api('submit', payload).then(function(){
-      el('memo').value=''; el('hours').value='1';
+      el('memo').value='';
+      el('hours').value='1';
+      el('actualHours').value='0'; el('actualMinutes').value='0';
+      updateKindUi();   // 時間欄の入力可否を種別に合わせて戻す
       el('submitBtn').disabled = false;
       // 保存は成功済み。以降の再読込が失敗しても「記録に失敗」とは出さない。
       api('me').then(function(d){
