@@ -49,7 +49,7 @@
   .hint{font-size:12px;color:#8a8a8e;margin-top:4px;}
   /* 取得単位が他と違う種別（子の看護等休暇・早退等）の注意書き。見落とすと誤入力になるので赤で出す */
   .hint.alert{color:#c00;font-weight:700;}
-  /* 入力できない欄は見て分かるようにする（早退・遅刻・欠勤のときの「時間」） */
+  /* 入力できない欄は見て分かるようにする（早退・遅刻・欠勤・中抜けのときの「時間」） */
   input:disabled{background:#f0f0f2;color:#aaa;}
   /* 実際の時間：[2]時間[30]分 を1行に並べる */
   .hm{display:flex;align-items:center;gap:6px;}
@@ -114,7 +114,7 @@
       <label>時間</label>
       <input type="number" id="hours" value="1" min="1" max="24" step="1" inputmode="numeric">
       <div class="hint" id="hoursHint">1時間単位で入力します（1日休む場合は勤務時間数、例：8）。</div>
-      <!-- 早退・遅刻・欠勤のときだけ出す。時間は数えないが、何分だったかは記録として残す -->
+      <!-- 早退・遅刻・欠勤・中抜けのときだけ出す。時間は数えないが、何分だったかは記録として残す -->
       <div id="actualWrap" class="hidden">
         <label>実際の時間（必須）</label>
         <div class="hm">
@@ -124,6 +124,8 @@
         <div class="hint alert">記入例：2時間30分の欠勤 →「2」時間「30」分／30分の遅刻 →「0」時間「30」分</div>
       </div>
       <label>メモ（任意）</label>
+      <!-- 中抜けのときだけ出す。無給になった時間は実時間と一致しないことがあるので、メモに書いてもらう -->
+      <div class="hint alert hidden" id="memoHint">中抜けは無給です。無給になった時間（例：2時間）をメモに必ず書いてください。</div>
       <textarea id="memo" placeholder="例：通院のため" style="min-height:56px;" maxlength="200"></textarea>
       <button id="submitBtn">この内容で記録する</button>
       <div id="formMsg"></div>
@@ -164,7 +166,7 @@
   var adminStaff = [];        // 管理者の代理入力用 [{name, job, refreshEligible}]
   // 全種別のマスター。サーバーが返す絞り込み済みリストで上書きしないこと
   // （上書きすると管理者の代理入力で リフレッシュ/養育 が選べなくなる）。
-  var KINDS_ALL = ['有給','リフレッシュ','看護','養育','早退','遅刻','欠勤','特別'];
+  var KINDS_ALL = ['有給','リフレッシュ','看護','養育','早退','遅刻','欠勤','中抜け','特別'];
 
   // ── 休暇の説明（「？」で開く）──
   // 就業規則の内容をそのまま載せる。制度が変わったらここを直して再アップロードする。
@@ -322,7 +324,7 @@
   }
 
   // 時間を数えず「回数」だけを記録する種別（時間の正は勤怠システム側）
-  var COUNT_ONLY_KINDS = ['早退','遅刻','欠勤'];
+  var COUNT_ONLY_KINDS = ['早退','遅刻','欠勤','中抜け'];
   function isCountOnly(kind){ return COUNT_ONLY_KINDS.indexOf(kind) !== -1; }
 
   // 実際の時間のプルダウン（0〜12時間 / 5分刻み）。Code.gs 側の検証と範囲を合わせる。
@@ -336,7 +338,7 @@
 
   // 種別ごとに取得単位が違う。子の看護等休暇は当社では半日／1日のみ（時間単位は不可）。
   var HINT_DEFAULT = '1時間単位で入力します（1日休む場合は勤務時間数、例：8）。';
-  var HINT_COUNT_ONLY = '早退・遅刻・欠勤は、時間に関係なく「回数」のみを数えます。実際の時間は下の欄に必ずご記入ください。';
+  var HINT_COUNT_ONLY = '早退・遅刻・欠勤・中抜けは、時間に関係なく「回数」のみを数えます。実際の時間は下の欄に必ずご記入ください。';
   var HINT_BY_KIND = {
     '看護': '子の看護等休暇は半日または1日単位です。半日なら所定労働時間の半分、1日なら所定労働時間数を入力してください（時間単位での取得はできません）。'
   };
@@ -350,6 +352,7 @@
     el('hours').disabled = countOnly;
     el('hours').value = countOnly ? '' : (el('hours').value || '1');
     el('actualWrap').className = countOnly ? '' : 'hidden';
+    el('memoHint').className = el('kind').value === '中抜け' ? 'hint alert' : 'hint alert hidden';
   }
   el('kind').onchange = updateKindUi;
 
@@ -424,10 +427,11 @@
         + '<div class="bal"><div><div class="n">養育両立支援休暇'+helpBtn('youiku')+'</div><div class="sub">対象の子 '+esc(b['養育_対象子数']||0)+'人</div></div>'
           + youikuCell+'</div>';
       el('pills').innerHTML = '<div class="sect">今年度の記録（参考）</div>'
-        // 早退・遅刻・欠勤は回数のみ（時間は勤怠システム側が正）
+        // 早退・遅刻・欠勤・中抜けは回数のみ（時間は勤怠システム側が正）
         + '<span class="pill">早退 '+esc(b['早退_回数'])+'回</span>'
         + '<span class="pill">遅刻 '+esc(b['遅刻_回数'])+'回</span>'
         + '<span class="pill">欠勤 '+esc(b['欠勤_回数'])+'回</span>'
+        + '<span class="pill">中抜け '+esc(b['中抜け_回数']||0)+'回</span>'
         + '<span class="pill">特別 '+esc(b['特別_時間'])+'時間</span>';
       if(b['警告']){ el('warnBox').textContent = '⚠ '+b['警告']; show('warnBox'); }
     }
